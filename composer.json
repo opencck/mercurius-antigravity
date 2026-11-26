@@ -1,0 +1,61 @@
+{
+    "name": "opencck/mercurius-antigravity",
+    "description": "Models of a Google Antigravity plan for an agent: the official Antigravity CLI (agy) as a one-shot client of a model call, behind the Chat Completions API; a module of the Mercurius agent",
+    "type": "project",
+    "license": "MIT",
+    "keywords": ["amphp", "gemini", "antigravity", "subscription", "agent"],
+    "require": {
+        "php": ">=8.2",
+        "ext-json": "*",
+        "amphp/amp": "^3",
+        "amphp/byte-stream": "^2",
+        "amphp/http-server": "^3",
+        "amphp/process": "^2",
+        "amphp/socket": "^2",
+        "amphp/sync": "^2",
+        "opencck/mercurius-connectors": "dev-master",
+        "psr/log": "^3"
+    },
+    "require-dev": {
+        "amphp/phpunit-util": "^3",
+        "phpstan/phpstan": "^2",
+        "phpunit/phpunit": "^9.6",
+        "psalm/plugin-phpunit": "^0.22.2",
+        "vimeo/psalm": "^6"
+    },
+    "autoload": {
+        "psr-4": {
+            "Mercurius\\Antigravity\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Mercurius\\Antigravity\\Test\\": "test/"
+        }
+    },
+    "bin": ["bin/antigravity"],
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "config": {
+        "sort-packages": true,
+        "platform": {
+            "php": "8.2.27"
+        },
+        "allow-plugins": {}
+    },
+    "scripts": {
+        "test": "php -d zend.assertions=1 -d assert.exception=1 vendor/bin/phpunit",
+        "phpstan": "phpstan analyse --no-progress --memory-limit=1G",
+        "psalm": "psalm --no-progress --show-info=false",
+        "check": [
+            "@test",
+            "@phpstan",
+            "@psalm"
+        ]
+    },
+    "repositories": [{
+        "name": "connectors",
+        "type": "vcs",
+        "url": "https://github.com/opencck/mercurius-connectors"
+    }]
+}

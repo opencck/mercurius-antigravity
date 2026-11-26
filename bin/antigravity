@@ -1,0 +1,102 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * The antigravity service: ANTIGRAVITY_TOKEN (required, 16+ characters), ANTIGRAVITY_PORT (8095),
+ * ANTIGRAVITY_HOST (0.0.0.0), ANTIGRAVITY_COMMAND (agy), ANTIGRAVITY_HOME (/data/antigravity — the home of the CLI:
+ * its settings, its log and its sign-in), ANTIGRAVITY_MIN_VERSION (1.5.18), ANTIGRAVITY_IDLE_SECONDS (300 — how long
+ * a call may be silent), ANTIGRAVITY_MAX_CONCURRENT (2 — how many processes of the CLI run at once; a call waits for
+ * a place). The way out: directly when ANTIGRAVITY_PROXY is the word direct; else VLESS_URI, else ANTIGRAVITY_PROXY
+ * (socks5h://, http://), else directly — for everything the CLI sends.
+ */
+
+use Mercurius\Antigravity\AgyCli;
+use Mercurius\Antigravity\ChildEnv;
+use Mercurius\Antigravity\Egress;
+use Mercurius\Antigravity\Login;
+use Mercurius\Antigravity\ModelCall;
+use Mercurius\Antigravity\ModelList;
+use Mercurius\Antigravity\Quota;
+use Mercurius\Antigravity\RefusedEnvironment;
+use Mercurius\Antigravity\Server;
+use Mercurius\Connectors\RouteException;
+use Mercurius\Connectors\RouteFactory;
+use Psr\Log\NullLogger;
+
+use function Amp\trapSignal;
+
+foreach ([__DIR__ . '/../vendor/autoload.php', __DIR__ . '/../../../autoload.php'] as $autoload) {
+    if (is_file($autoload)) {
+        require $autoload;
+        break;
+    }
+}
+
+$token = getenv('ANTIGRAVITY_TOKEN');
+if (!is_string($token) || strlen($token) < 16) {
+    fwrite(STDERR, "ANTIGRAVITY_TOKEN is required (16+ characters)\n");
+    exit(78);
+}
+$port = (int) (getenv('ANTIGRAVITY_PORT') ?: 8095);
+$host = (string) (getenv('ANTIGRAVITY_HOST') ?: '0.0.0.0');
+$home = rtrim((string) (getenv('ANTIGRAVITY_HOME') ?: '/data/antigravity'), '/');
+$command = array_values(array_filter(explode(' ', (string) (getenv('ANTIGRAVITY_COMMAND') ?: 'agy')), static fn(string $part): bool => $part !== ''));
+$minVersion = (string) (getenv('ANTIGRAVITY_MIN_VERSION') ?: '1.5.18');
+if ($home === '' || $command === [] || preg_match('~^\d+\.\d+\.\d+$~', $minVersion) !== 1) {
+    fwrite(STDERR, "ANTIGRAVITY_HOME, ANTIGRAVITY_COMMAND or ANTIGRAVITY_MIN_VERSION is invalid\n");
+    exit(78);
+}
+// the CLI keeps its sign-in here: a folder it cannot write to would fail later, in the middle of a sign-in
+if (!is_dir($home) || !is_writable($home)) {
+    fwrite(STDERR, sprintf("%s is not a folder the service can write to (run the container as the owner of the folder)\n", $home));
+    exit(78);
+}
+$logger = new NullLogger();
+$routes = ['vless' => trim((string) getenv('VLESS_URI')), 'proxy' => trim((string) getenv('ANTIGRAVITY_PROXY'))];
+// the word direct in ANTIGRAVITY_PROXY keeps the service off every route, the VLESS of the installation too
+$routeName = strtolower($routes['proxy']) === 'direct' ? 'direct' : ($routes['vless'] !== '' ? 'vless' : ($routes['proxy'] !== '' ? 'proxy' : 'direct'));
+$egress = null;
+if ($routeName !== 'direct') {
+    try {
+        $egress = new Egress(RouteFactory::fromUri($routes[$routeName], $logger), $logger);
+    } catch (RouteException $e) {
+        // the address holds a secret: only its name and the kind of the mistake are said
+        fwrite(STDERR, sprintf("%s is not a route the service can use (%s)\n", $routeName === 'vless' ? 'VLESS_URI' : 'ANTIGRAVITY_PROXY', $e::class));
+        exit(78);
+    }
+}
+/** @var array<string, string> $parent */
+$parent = array_filter(getenv(), 'is_string');
+$env = new ChildEnv($parent, $home, $egress?->start());
+try {
+    // an inherited key of the API or cloud credentials stop the start: the plan is the only way in
+    $env->build();
+} catch (RefusedEnvironment $e) {
+    fwrite(STDERR, $e->getMessage() . "\n");
+    exit(78);
+}
+$cli = new AgyCli($command, $env, $minVersion);
+$tmp = rtrim(str_replace('\\', '/', sys_get_temp_dir()), '/') ?: '/tmp';
+// the folder of a call holds the history; a service that was killed left it behind
+foreach (glob($tmp . '/antigravity-*', GLOB_ONLYDIR) ?: [] as $stale) {
+    if (preg_match('~/antigravity-[0-9a-f]{16}$~', $stale) === 1) {
+        $items = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($stale, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
+        foreach ($items as $item) {
+            $item->isDir() && !$item->isLink() ? @rmdir($item->getPathname()) : @unlink($item->getPathname());
+        }
+        @rmdir($stale);
+    }
+}
+$idle = max(30.0, (float) (getenv('ANTIGRAVITY_IDLE_SECONDS') ?: 300));
+$concurrent = max(1, min(8, (int) (getenv('ANTIGRAVITY_MAX_CONCURRENT') ?: 2)));
+$work = $tmp . '/antigravity-work';
+$quota = new Quota($cli, $work);
+$models = new ModelList($cli);
+$calls = new ModelCall($cli, $models, $quota, $tmp, dirname(__DIR__) . '/resources/inert-mcp.php', $logger, $idle, $concurrent);
+$server = (new Server($cli, new Login($cli, $work), $calls, $quota, $models, $token, $logger, $routeName))->start($host, max(1, min(65535, $port)));
+fwrite(STDERR, sprintf("antigravity listening on %s:%d\n", $host, $port));
+trapSignal([2, 15]);
+$server->stop();
+$egress?->stop();
