@@ -19,6 +19,10 @@ final class StderrLogger extends AbstractLogger {
      * @param array<array-key, mixed> $context
      */
     public function log($level, string|\Stringable $message, array $context = []): void {
+        // the HTTP server narrates every connection at these levels: the journal keeps what somebody must read
+        if ($level === 'debug' || $level === 'info') {
+            return;
+        }
         $line = json_encode(
             ['time' => gmdate('c'), 'level' => is_string($level) ? $level : 'info', 'message' => (string) $message, 'context' => $context],
             JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR,
