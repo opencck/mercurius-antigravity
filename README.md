@@ -62,6 +62,7 @@ Everything but `/health` needs `Authorization: Bearer <ANTIGRAVITY_TOKEN>`.
 | `ANTIGRAVITY_IDLE_SECONDS` | `300` | How long a call may be silent |
 | `ANTIGRAVITY_MAX_CONCURRENT` | `2` | How many `agy` processes run at once |
 | `ANTIGRAVITY_PROXY` | — | `socks5h://`, `http://`, or `direct`; `VLESS_URI` wins unless it is `direct` |
+| `ANTIGRAVITY_EGRESS_HOSTS` | — | Exact host names, by commas, the proxy of the service opens besides its own short list of Google hosts |
 
 The service refuses to start when `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `GOOGLE_APPLICATION_CREDENTIALS`,
 `GOOGLE_CLOUD_PROJECT` or `GOOGLE_GENAI_USE_VERTEXAI` is in its environment: `agy` would sign in with it and bill

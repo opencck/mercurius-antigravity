@@ -7,15 +7,20 @@ namespace Mercurius\Antigravity;
 use Amp\CancelledException;
 use Amp\Process\Process;
 use Amp\TimeoutCancellation;
+use Revolt\EventLoop;
 use Throwable;
 
 use function Amp\async;
 
 /**
  * The sign-in of the owner to the plan, done by `agy` itself. Asked a question in print mode without a sign-in, `agy`
- * prints a link of Google and waits for the code the owner gets after signing in in a browser of their own; the code
- * goes to its input. The service passes the link and the code along and keeps neither. One sign-in at a time; `agy`
- * waits for the code for a minute and then gives up.
+ * prints a link of Google and waits for the code the owner gets after signing in in a browser of their own. The
+ * service passes the link and the code along and keeps neither. One sign-in at a time; `agy` waits for the code for
+ * a minute and then gives up.
+ *
+ * `agy` offers the link only when its input is a terminal: with a plain pipe it answers "authentication required"
+ * and prints no link (seen on 1.5.18). So this one step — the sign-in, never a model call — runs under `script`,
+ * which gives the child a terminal and carries the code from the service to it.
  *
  * spec: services/antigravity/BRIEF.md#вход
  */
@@ -24,7 +29,8 @@ final class Login {
     public const WAIT = 60.0;
     private const LINK_SECONDS = 20.0;
     private const DONE_SECONDS = 30.0;
-    private const LINK = '~https://accounts\.google\.com/\S+~';
+    private const LINK = '~https://accounts\.google\.com/[^\s\x1b]+~';
+    private const SCRIPT = '/usr/bin/script';
 
     private ?Process $process = null;
     private float $startedAt = 0.0;
@@ -47,34 +53,32 @@ final class Login {
                 @mkdir($this->workDir, 0700, true);
             }
             // any question in print mode asks for the sign-in first; this one costs nothing of the plan
-            $process = Process::start([...$this->cli->command(), '-p', '/usage', '--output-format', 'json'], $this->workDir, $this->cli->env()->build());
+            $process = Process::start([...Children::session(), ...$this->command()], $this->workDir, $this->cli->env()->build());
         } catch (Throwable $e) {
             throw new LoginFailed('The Antigravity CLI did not start: ' . $e::class);
         }
         $this->process = $process;
         $this->startedAt = microtime(true);
-        // what agy prints after the link is not needed and never kept
-        $drain = async(static function () use ($process): void {
-            try {
-                while ($process->getStderr()->read() !== null) {
-                }
-            } catch (Throwable) {
-            }
-        });
-        $drain->ignore();
+        // a sign-in nobody finished does not stay: agy itself gives up at the same time
+        EventLoop::unreference(EventLoop::delay(self::WAIT + 5.0, function () use ($process): void {
+            $this->drop($process);
+        }));
+        $this->drain($process, true);
         $seen = '';
         $wait = new TimeoutCancellation(self::LINK_SECONDS);
         try {
             while (($chunk = $process->getStdout()->read($wait)) !== null) {
                 $seen = substr($seen . $chunk, -8192);
                 if (preg_match(self::LINK, $seen, $m) === 1 && strpos($seen, "\n", (int) strpos($seen, $m[0])) !== false) {
+                    // what agy prints after the link is not needed and never kept
+                    $this->drain($process, false);
                     return $m[0];
                 }
             }
         } catch (CancelledException) {
             // no link in time
         }
-        $this->cancel();
+        $this->drop($process);
         throw new LoginFailed($this->cli->signedIn() ? 'The plan is signed in already.' : 'The Antigravity CLI gave no link to sign in.');
     }
 
@@ -95,24 +99,51 @@ final class Login {
         }
         try {
             $process->getStdin()->write($code . "\n");
-            $process->getStdin()->end();
             $process->join(new TimeoutCancellation(self::DONE_SECONDS));
         } catch (Throwable) {
             // agy took too long or went away: what it left decides
         }
-        $this->cancel();
+        $this->drop($process);
         return $this->cli->signedIn();
     }
 
     public function cancel(): void {
-        $process = $this->process;
-        $this->process = null;
-        try {
-            if ($process !== null && $process->isRunning()) {
-                $process->kill();
-            }
-        } catch (Throwable) {
-            // already gone
+        if ($this->process !== null) {
+            $this->drop($this->process);
         }
+    }
+
+    /** Stops one sign-in; another one started meanwhile is left alone. */
+    private function drop(Process $process): void {
+        if ($this->process === $process) {
+            $this->process = null;
+        }
+        Children::stop($process);
+    }
+
+    /**
+     * The command of the sign-in: under `script` where it is there, so `agy` has a terminal to ask at.
+     *
+     * @return non-empty-list<string>
+     */
+    private function command(): array {
+        $command = [...$this->cli->command(), '-p', '/usage', '--output-format', 'json'];
+        if (PHP_OS_FAMILY !== 'Linux' || !is_executable(self::SCRIPT)) {
+            return $command;
+        }
+        return [self::SCRIPT, '-qfec', implode(' ', array_map(escapeshellarg(...), $command)), '/dev/null'];
+    }
+
+    /** Reads a stream of the child to its end and keeps nothing. */
+    private function drain(Process $process, bool $errors): void {
+        async(static function () use ($process, $errors): void {
+            try {
+                $stream = $errors ? $process->getStderr() : $process->getStdout();
+                while ($stream->read() !== null) {
+                }
+            } catch (Throwable) {
+                // the stream went with the child
+            }
+        })->ignore();
     }
 }

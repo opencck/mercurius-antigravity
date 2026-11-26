@@ -284,6 +284,8 @@ final class ServiceTest extends AsyncTestCase {
         yield 'a tool that was not offered' => ['[[foreign]]', self::tools(), 422, 'tool_violation'];
         yield 'another MCP server' => ['[[other-server]]', self::tools(), 422, 'tool_violation'];
         yield 'the default agent instead of ours' => ['[[fallback]]', null, 422, 'tool_violation'];
+        yield 'a step of an unknown kind' => ['[[unknown-step]]', null, 422, 'tool_violation'];
+        yield 'a broken call with terms in the log is not an account matter' => ['[[crash-with-log]]', null, 502, 'api_error'];
         yield 'a used-up window seen in the log' => ['[[quota]]', null, 429, 'rate_limit_error'];
         yield 'a used-up window in the result' => ['[[quota-result]]', null, 429, 'rate_limit_error'];
         yield 'no sign-in' => ['[[auth]]', null, 401, 'authentication_error'];
@@ -389,8 +391,10 @@ final class ServiceTest extends AsyncTestCase {
 
         [$status, $health] = $this->call($server, 'GET', '/health', null, null);
         self::assertSame([503, 'unavailable'], [$status, $health['status']]);
-        foreach (['daily-cloudcode-pa.googleapis.com' => true, 'accounts.google.com' => true, 'antigravity.google' => true, 'oauth2.googleapis.com' => true, 'evilgoogle.com' => false, 'google.com.evil.example' => false, 'example.com' => false] as $host => $allowed) {
-            self::assertSame($allowed, Egress::allowed($host), $host);
+        $egress = new Egress(new \Amp\Socket\DnsSocketConnector(), new NullLogger(), ['extra.example.com', 'bad host', '--x']);
+        foreach (['daily-cloudcode-pa.googleapis.com' => true, 'accounts.google.com' => true, 'antigravity.google' => true, 'oauth2.googleapis.com' => true, 'extra.example.com' => true,
+            'storage.googleapis.com' => false, 'docs.google.com' => false, 'evilgoogle.com' => false, 'google.com.evil.example' => false, 'example.com' => false] as $host => $allowed) {
+            self::assertSame($allowed, $egress->allowed($host), $host);
         }
     }
 

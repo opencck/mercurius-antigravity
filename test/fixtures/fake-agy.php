@@ -101,6 +101,14 @@ foreach (['[[quota-result]]' => 'You have exhausted your capacity on this model'
     }
 }
 $out($step(['step_index' => 0, 'state' => 'DONE', 'step_type' => 'user_input']));
+if (str_contains($prompt, '[[unknown-step]]')) {
+    $out($step(['step_index' => 1, 'state' => 'ACTIVE', 'step_type' => 'shell', 'command' => 'id']));
+    sleep(30);
+}
+if (str_contains($prompt, '[[crash-with-log]]')) {
+    $write('I1126 notice.go:1] By using this service you agree to the terms of service; verify your account settings');
+    exit(1);
+}
 if (str_contains($prompt, '[[env]]')) {
     $text = json_encode(['env' => array_keys(getenv()), 'home' => $home, 'cwd' => getcwd(), 'files' => array_values(array_diff((array) scandir((string) getcwd()), ['.', '..'])), 'args' => $args], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
     $out(['event' => 'result', 'result' => ['conversation_id' => $id, 'status' => 'SUCCESS', 'response' => $text, 'usage' => $usage]]);

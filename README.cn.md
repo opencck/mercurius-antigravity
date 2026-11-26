@@ -59,6 +59,7 @@ Antigravity 和 Gemini CLI 账号被暂停或终止。本模块默认关闭。�
 | `ANTIGRAVITY_IDLE_SECONDS` | `300` | 一次调用允许沉默的时长 |
 | `ANTIGRAVITY_MAX_CONCURRENT` | `2` | 同时运行的 `agy` 进程数 |
 | `ANTIGRAVITY_PROXY` | — | `socks5h://`、`http://` 或 `direct`；除非为 `direct`，否则 `VLESS_URI` 优先 |
+| `ANTIGRAVITY_EGRESS_HOSTS` | — | 以逗号分隔的精确主机名，服务的代理在自身简短的 Google 主机列表之外额外放行 |
 
 当环境中存在 `GEMINI_API_KEY`、`GOOGLE_API_KEY`、`GOOGLE_APPLICATION_CREDENTIALS`、`GOOGLE_CLOUD_PROJECT` 或
 `GOOGLE_GENAI_USE_VERTEXAI` 时，服务拒绝启动：`agy` 会用它登录，并按 API 价目计费而不是使用套餐。

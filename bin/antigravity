@@ -9,7 +9,8 @@ declare(strict_types=1);
  * its settings, its log and its sign-in), ANTIGRAVITY_MIN_VERSION (1.5.18), ANTIGRAVITY_IDLE_SECONDS (300 — how long
  * a call may be silent), ANTIGRAVITY_MAX_CONCURRENT (2 — how many processes of the CLI run at once; a call waits for
  * a place). The way out: directly when ANTIGRAVITY_PROXY is the word direct; else VLESS_URI, else ANTIGRAVITY_PROXY
- * (socks5h://, http://), else directly — for everything the CLI sends.
+ * (socks5h://, http://), else directly — for everything the CLI sends. ANTIGRAVITY_EGRESS_HOSTS — exact names of
+ * hosts, by commas, the proxy of the service opens besides its own list.
  */
 
 use Mercurius\Antigravity\AgyCli;
@@ -23,7 +24,7 @@ use Mercurius\Antigravity\RefusedEnvironment;
 use Mercurius\Antigravity\Server;
 use Mercurius\Connectors\RouteException;
 use Mercurius\Connectors\RouteFactory;
-use Psr\Log\NullLogger;
+use Mercurius\Antigravity\StderrLogger;
 
 use function Amp\trapSignal;
 
@@ -53,14 +54,14 @@ if (!is_dir($home) || !is_writable($home)) {
     fwrite(STDERR, sprintf("%s is not a folder the service can write to (run the container as the owner of the folder)\n", $home));
     exit(78);
 }
-$logger = new NullLogger();
+$logger = new StderrLogger(STDERR);
 $routes = ['vless' => trim((string) getenv('VLESS_URI')), 'proxy' => trim((string) getenv('ANTIGRAVITY_PROXY'))];
 // the word direct in ANTIGRAVITY_PROXY keeps the service off every route, the VLESS of the installation too
 $routeName = strtolower($routes['proxy']) === 'direct' ? 'direct' : ($routes['vless'] !== '' ? 'vless' : ($routes['proxy'] !== '' ? 'proxy' : 'direct'));
 $egress = null;
 if ($routeName !== 'direct') {
     try {
-        $egress = new Egress(RouteFactory::fromUri($routes[$routeName], $logger), $logger);
+        $egress = new Egress(RouteFactory::fromUri($routes[$routeName], $logger), $logger, array_values(array_filter(explode(',', (string) getenv('ANTIGRAVITY_EGRESS_HOSTS')))));
     } catch (RouteException $e) {
         // the address holds a secret: only its name and the kind of the mistake are said
         fwrite(STDERR, sprintf("%s is not a route the service can use (%s)\n", $routeName === 'vless' ? 'VLESS_URI' : 'ANTIGRAVITY_PROXY', $e::class));

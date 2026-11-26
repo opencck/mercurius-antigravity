@@ -129,18 +129,20 @@ final class AgyCli {
      * @throws CancelledException when it took too long
      */
     public function run(array $args, ?string $cwd = null, ?float $seconds = null): array {
-        $process = Process::start([...$this->command, ...$args], $cwd, $this->env->build());
+        $process = Process::start([...Children::session(), ...$this->command, ...$args], $cwd, $this->env->build());
         $process->getStdin()->close();
         $out = self::reader($process->getStdout());
         $err = self::reader($process->getStderr());
         try {
             $code = $process->join(new TimeoutCancellation($seconds ?? $this->probeSeconds));
         } catch (CancelledException $e) {
-            $process->kill();
+            Children::stop($process);
             $out->ignore();
             $err->ignore();
             throw $e;
         }
+        // what agy left behind after its own end is stopped too
+        Children::stop($process);
         return [$code, $out->await(), $err->await()];
     }
 

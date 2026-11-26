@@ -33,7 +33,8 @@ final class Server {
     /** seconds an answer of the CLI about itself is reused: a probe starts a process */
     private const STATUS_SECONDS = 30.0;
     private const MAX_BODY = 4096;
-    private const MAX_REQUEST = 32 * 1024 * 1024;
+    /** a request holds a history as text: pictures are not passed on, so megabytes are enough */
+    private const MAX_REQUEST = 8 * 1024 * 1024;
     private const ROUTES = ['GET /auth/status', 'POST /auth/login', 'POST /auth/code', 'POST /auth/logout', 'POST /v1/chat/completions', 'GET /v1/models', 'GET /usage'];
 
     /** @var ?array{float, CliStatus} */

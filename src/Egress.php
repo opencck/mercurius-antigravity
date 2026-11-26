@@ -20,27 +20,43 @@ use function Amp\Socket\listen;
 /**
  * The way out for everything `agy` sends. The address of Google's API cannot be replaced in `agy`, so there is no
  * relay in front of it: when the service has a route (VLESS or a proxy), the child gets this proxy as HTTPS_PROXY, and
- * the proxy opens tunnels through that route. It takes CONNECT only, and only to hosts of Google on port 443 — a
- * child cannot use it to reach anything else. TLS ends at Google: the proxy sees no token.
+ * the proxy opens tunnels through that route. It takes CONNECT only, and only to the listed hosts of Google on port
+ * 443. TLS ends at Google: the proxy sees no token. The proxy is a route, not a wall: a process that ignores
+ * HTTPS_PROXY still has the network of the container.
  *
  * spec: services/antigravity/BRIEF.md#сеть
  */
 final class Egress {
     /**
-     * The hosts `agy` was seen to name (the sign-in, the return after it, the API) and their subdomains. The list is
-     * wide until a sign-in of the owner lets the real one be recorded: a refused host is written to the log by name.
+     * The hosts `agy` was seen to name: the sign-in, the exchange of its code, the return after it, the API. Whole
+     * domains of Google are not opened: buckets and documents of anybody live there. A host `agy` needs and the list
+     * lacks is refused and written to the log by name; ANTIGRAVITY_EGRESS_HOSTS adds exact names.
      */
-    private const HOSTS = ['googleapis.com', 'google.com', 'antigravity.google'];
+    private const HOSTS = ['accounts.google.com', 'oauth2.googleapis.com', 'www.googleapis.com', 'cloudcode-pa.googleapis.com', 'daily-cloudcode-pa.googleapis.com', 'antigravity.google', 'www.antigravity.google'];
     private const HEAD_BYTES = 8192;
     private const HEAD_SECONDS = 10.0;
     private const CONNECT_SECONDS = 20.0;
 
     private ?ResourceServerSocket $server = null;
 
+    /** @var array<string, true> */
+    private readonly array $hosts;
+
+    /** @param list<string> $more exact names of hosts the owner added */
     public function __construct(
         private readonly SocketConnector $route,
         private readonly LoggerInterface $logger,
-    ) {}
+        array $more = [],
+    ) {
+        $hosts = array_fill_keys(self::HOSTS, true);
+        foreach ($more as $host) {
+            $host = strtolower(trim($host));
+            if (preg_match('~^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$~', $host) === 1) {
+                $hosts[$host] = true;
+            }
+        }
+        $this->hosts = $hosts;
+    }
 
     /** Starts to listen on the loopback and gives the address for HTTPS_PROXY. */
     public function start(): string {
@@ -80,7 +96,7 @@ final class Egress {
                 return;
             }
             $host = strtolower($match[1]);
-            if ($match[2] !== '443' || !self::allowed($host)) {
+            if ($match[2] !== '443' || !$this->allowed($host)) {
                 // the name of a host is no secret, and the list is tuned by it
                 $this->logger->warning('antigravity: a tunnel to a host outside Google was refused', ['host' => $host, 'port' => $match[2]]);
                 $client->write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
@@ -120,12 +136,7 @@ final class Egress {
         }
     }
 
-    public static function allowed(string $host): bool {
-        foreach (self::HOSTS as $allowed) {
-            if ($host === $allowed || str_ends_with($host, '.' . $allowed)) {
-                return true;
-            }
-        }
-        return false;
+    public function allowed(string $host): bool {
+        return isset($this->hosts[strtolower($host)]);
     }
 }

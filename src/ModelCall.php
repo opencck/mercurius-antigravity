@@ -41,6 +41,8 @@ final class ModelCall {
     private const STDERR_MAX = 64 * 1024;
     private const LINE_MAX = 16 * 1024 * 1024;
     private const POLL_SECONDS = 2.0;
+    /** the kinds of a step that are not a tool and carry nothing to pass on */
+    private const QUIET_STEPS = ['user_input', 'error_message'];
     private const NO_USAGE = ['input_tokens' => 0, 'output_tokens' => 0, 'thinking_tokens' => 0, 'cache_read_tokens' => 0];
 
     private readonly LocalSemaphore $places;
@@ -105,7 +107,7 @@ final class ModelCall {
             }
             array_push($arguments, '--agent', self::AGENT, '--log-file', $log);
             try {
-                $process = Process::start([...self::session(), ...$this->cli->command(), ...$arguments], $dir . '/workspace', $this->cli->env()->build());
+                $process = Process::start([...Children::session(), ...$this->cli->command(), ...$arguments], $dir . '/workspace', $this->cli->env()->build());
             } catch (Throwable $e) {
                 $this->logger->error('antigravity: agy did not start', ['error' => $e::class]);
                 throw new CallFailed(503, 'api_error', 'The Antigravity CLI did not start.');
@@ -119,15 +121,15 @@ final class ModelCall {
                 // agy went away before it read: what it said decides the error below
             }
 
-            $offered = array_flip($request->toolNames());
             $written = '';
             $usage = self::NO_USAGE;
             $started = false;
-            foreach ($this->lines($process, $log, $started, $cancellation) as $event) {
+            foreach ($this->lines($process, $log, $started, $group, $cancellation) as $event) {
                 $kind = Json::string($event, 'event');
                 if ($kind === 'init') {
                     $conversation = self::conversationId($event);
-                    if (self::fellBack($log)) {
+                    $agent = Json::string(Json::object($event, 'init'), 'agent');
+                    if (self::fellBack($log) || ($agent !== null && $agent !== self::AGENT)) {
                         throw $this->violation('agy did not load the agent of the call and fell back to its default agent');
                     }
                     continue;
@@ -138,9 +140,16 @@ final class ModelCall {
                     $conversation ??= self::conversationId($step);
                     $type = Json::string($step, 'step_type');
                     if ($type === 'tool') {
-                        $call = self::hostCall($step, $offered);
+                        $call = self::hostCall($step, $request);
                         if ($call === null) {
                             throw $this->violation('agy tried a tool that is not a tool of the application');
+                        }
+                        if (Json::string($step, 'state') !== 'ACTIVE') {
+                            // our own call that is not started yet: its arguments may still be incomplete
+                            continue;
+                        }
+                        if (self::fellBack($log)) {
+                            throw $this->violation('agy did not load the agent of the call and fell back to its default agent');
                         }
                         $usage = self::add($usage, Json::object($step, 'usage'));
                         yield Event::tool($call[0], $call[1]);
@@ -151,10 +160,17 @@ final class ModelCall {
                     if ($type === 'agent_response') {
                         $delta = Json::string($step, 'text_delta') ?? '';
                         if ($delta !== '' && Json::string($step, 'state') !== 'DONE') {
+                            // the text of the default agent is never passed on: the log is looked at before the first word
+                            if ($written === '' && self::fellBack($log)) {
+                                throw $this->violation('agy did not load the agent of the call and fell back to its default agent');
+                            }
                             $written .= $delta;
                             yield Event::text($delta);
                         }
                         $usage = self::add($usage, Json::object($step, 'usage'));
+                    } elseif (!in_array($type, self::QUIET_STEPS, true)) {
+                        // a step of a kind the service does not know may be a tool under another name: the call stops
+                        throw $this->violation('agy made a step of an unknown kind');
                     }
                     continue;
                 }
@@ -162,7 +178,7 @@ final class ModelCall {
                     $result = Json::object($event, 'result');
                     $conversation ??= self::conversationId($result);
                     if (Json::string($result, 'status') !== 'SUCCESS' || isset($result['error'])) {
-                        throw $this->failure((Json::string($result, 'error') ?? '') . "\n" . self::settled($stderr) . "\n" . self::logTail($log), $group);
+                        throw $this->failure((Json::string($result, 'error') ?? '') . "\n" . self::settled($stderr), self::logTail($log), $group);
                     }
                     if (self::fellBack($log)) {
                         throw $this->violation('agy did not load the agent of the call and fell back to its default agent');
@@ -180,10 +196,10 @@ final class ModelCall {
                 }
             }
             // the stream ended without a result: what agy said elsewhere tells why
-            throw $this->failure(self::settled($stderr) . "\n" . self::logTail($log), $group);
+            throw $this->failure(self::settled($stderr), self::logTail($log), $group);
         } finally {
             if ($process !== null) {
-                self::stop($process);
+                Children::stop($process);
             }
             $this->forget($conversation);
             self::remove($dir);
@@ -204,7 +220,7 @@ final class ModelCall {
      * @throws CallFailed
      * @psalm-suppress InvalidReturnType the generator ends by a plain return
      */
-    private function lines(Process $process, string $log, bool &$started, ?Cancellation $cancellation): \Generator {
+    private function lines(Process $process, string $log, bool &$started, string $group, ?Cancellation $cancellation): \Generator {
         $stdout = $process->getStdout();
         $buffer = '';
         $silentSince = microtime(true);
@@ -217,7 +233,7 @@ final class ModelCall {
                     throw $e;
                 }
                 if (!$started && str_contains(self::logTail($log), 'RESOURCE_EXHAUSTED')) {
-                    throw $this->failure(self::logTail($log), '');
+                    throw $this->failure('', self::logTail($log), $group);
                 }
                 if (microtime(true) - $silentSince > $this->idleSeconds) {
                     throw new CallFailed(504, 'timeout_error', 'The Antigravity CLI was silent for too long.');
@@ -251,16 +267,26 @@ final class ModelCall {
      * The call of a tool of the application in a step, or null when the step is anything else.
      *
      * @param array<array-key, mixed> $step
-     * @param array<string, int> $offered
      * @return ?array{string, string} the name and the arguments — a JSON object, empty when `agy` gave none that parse
      */
-    private static function hostCall(array $step, array $offered): ?array {
+    private static function hostCall(array $step, ChatRequest $request): ?array {
         $info = Json::object($step, 'tool_info');
         $tool = Json::string($step, 'tool_name') ?? Json::string($info, 'name');
         $parameters = Json::object($info, 'parameters');
         $name = Json::string($parameters, 'ToolName');
-        if ($tool !== 'call_mcp_tool' || Json::string($parameters, 'ServerName') !== PromptBuilder::SERVER || $name === null || !isset($offered[$name])) {
+        $offered = null;
+        foreach ($request->tools as $candidate) {
+            if ($candidate['name'] === $name) {
+                $offered = $candidate;
+            }
+        }
+        if ($tool !== 'call_mcp_tool' || Json::string($parameters, 'ServerName') !== PromptBuilder::SERVER || $name === null || $offered === null) {
             return null;
+        }
+        if (!array_key_exists('Arguments', $parameters)) {
+            // no arguments at all: an answer cut short for a tool that needs some, an empty object for one that needs none
+            $required = Json::object($offered['schema'], 'required');
+            return [$name, $required === [] ? '{}' : ''];
         }
         $text = Json::string($parameters, 'Arguments');
         if ($text !== null) {
@@ -268,7 +294,7 @@ final class ModelCall {
             $decoded = json_decode($text, true, 64);
             return [$name, is_array($decoded) ? self::object($decoded) : ''];
         }
-        return [$name, isset($parameters['Arguments']) && !is_array($parameters['Arguments']) ? '' : self::object(Json::object($parameters, 'Arguments'))];
+        return [$name, is_array($parameters['Arguments']) ? self::object($parameters['Arguments']) : ''];
     }
 
     /** @param array<array-key, mixed> $value */
@@ -293,11 +319,17 @@ final class ModelCall {
         $head = "---\nname: " . self::AGENT . "\ndescription: The model of a Mercurius call\nmainAgent: true\nsubagent: false\nexcludeDefaultComponents: true\ninheritMcp: false\n";
         if ($request->tools !== []) {
             $manifest = array_map(static fn(array $tool): array => ['name' => $tool['name'], 'description' => $tool['description'], 'inputSchema' => $tool['schema']], $request->tools);
-            file_put_contents($dir . '/tools.json', json_encode($manifest, ChatRequest::JSON));
+            $written = file_put_contents($dir . '/tools.json', json_encode($manifest, ChatRequest::JSON));
+            if ($written === false) {
+                throw new CallFailed(503, 'api_error', 'The folder of the call could not be written.');
+            }
             $head .= "mcpServers:\n  - name: " . PromptBuilder::SERVER . "\n    command: " . json_encode(PHP_BINARY, ChatRequest::JSON)
                 . "\n    args: " . json_encode([$this->inertMcp, $dir . '/tools.json'], ChatRequest::JSON) . "\n";
         }
-        file_put_contents($agentDir . '/agent.md', $head . "---\n" . $agent . "\n");
+        // without the file agy would start its default agent, with its own tools
+        if (file_put_contents($agentDir . '/agent.md', $head . "---\n" . $agent . "\n") === false) {
+            throw new CallFailed(503, 'api_error', 'The folder of the call could not be written.');
+        }
         return $dir . '/agy.log';
     }
 
@@ -307,8 +339,10 @@ final class ModelCall {
     }
 
     /** What `agy` said, as an error of the call. */
-    private function failure(string $said, string $group): CallFailed {
-        $lower = strtolower($said);
+    private function failure(string $said, string $log, string $group): CallFailed {
+        // the words of the error decide; the log is long and may mention anything, so only one sign is read from it
+        $exhausted = str_contains($log, 'RESOURCE_EXHAUSTED');
+        $lower = strtolower($said . ($exhausted ? "\n" . $log : ''));
         $has = static function (string ...$needles) use ($lower): bool {
             foreach ($needles as $needle) {
                 if (str_contains($lower, $needle)) {
@@ -326,7 +360,7 @@ final class ModelCall {
         if ($has('credits balance is too low', 'billing cap', 'daily cap')) {
             return new CallFailed(402, 'billing_error', 'The paid use beyond the plan is spent.');
         }
-        if ($has('resource_exhausted', 'quota', 'exhausted your capacity', '(code 429)')) {
+        if ($exhausted || $has('resource_exhausted', 'quota', 'exhausted your capacity', '(code 429)')) {
             $until = preg_match('~resets in ((?:\d+h)?(?:\d+m)?(?:\d+s)?)~', $lower, $m) === 1 ? self::after($m[1]) : null;
             $until ??= $group === '' ? null : $this->quota->closedUntil($group);
             if ($until !== null && $group !== '') {
@@ -424,29 +458,6 @@ final class ModelCall {
             if (is_file($path)) {
                 @unlink($path);
             }
-        }
-    }
-
-    /**
-     * On Linux a call is a session of its own, so `agy`, its language server and the inert MCP end together.
-     *
-     * @return list<string>
-     */
-    private static function session(): array {
-        return PHP_OS_FAMILY === 'Linux' && is_executable('/usr/bin/setsid') && function_exists('posix_kill') ? ['/usr/bin/setsid'] : [];
-    }
-
-    private static function stop(Process $process): void {
-        try {
-            if (!$process->isRunning()) {
-                return;
-            }
-            if (self::session() !== []) {
-                posix_kill(-$process->getPid(), 9);
-            }
-            $process->kill();
-        } catch (Throwable) {
-            // already gone
         }
     }
 

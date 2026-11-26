@@ -25,6 +25,7 @@ final class Quota {
     private ?array $groups = null;
     private float $askedAt = 0.0;
     private bool $asking = false;
+    private bool $asked = false;
     private bool $stale = false;
 
     /** @var \Closure(): float */
@@ -48,8 +49,10 @@ final class Quota {
      */
     public function read(bool $fresh = false): ?array {
         $now = ($this->clock)();
-        if (!$this->asking && ($fresh || $this->groups === null || $now - $this->askedAt >= self::KEEP_SECONDS)) {
+        // an answer that did not come is remembered for the same minute: a silent CLI is not asked before every call
+        if (!$this->asking && ($fresh || !$this->asked || $now - $this->askedAt >= self::KEEP_SECONDS)) {
             $this->asking = true;
+            $this->asked = true;
             try {
                 $groups = $this->ask();
                 $this->askedAt = $now;

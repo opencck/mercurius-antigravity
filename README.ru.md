@@ -60,6 +60,7 @@ Vertex: в Меркурии это провайдеры `gemini:` и `vertex:`, 
 | `ANTIGRAVITY_IDLE_SECONDS` | `300` | Сколько вызов может молчать |
 | `ANTIGRAVITY_MAX_CONCURRENT` | `2` | Сколько процессов `agy` работает одновременно |
 | `ANTIGRAVITY_PROXY` | — | `socks5h://`, `http://` или `direct`; `VLESS_URI` важнее, если не задано `direct` |
+| `ANTIGRAVITY_EGRESS_HOSTS` | — | Точные имена хостов через запятую, которые прокси сервиса открывает сверх своего короткого списка хостов Google |
 
 Сервис отказывается стартовать, когда в его окружении есть `GEMINI_API_KEY`, `GOOGLE_API_KEY`,
 `GOOGLE_APPLICATION_CREDENTIALS`, `GOOGLE_CLOUD_PROJECT` или `GOOGLE_GENAI_USE_VERTEXAI`: `agy` вошёл бы по ним и
