@@ -32,7 +32,7 @@ final class Egress {
      * domains of Google are not opened: buckets and documents of anybody live there. A host `agy` needs and the list
      * lacks is refused and written to the log by name; ANTIGRAVITY_EGRESS_HOSTS adds exact names.
      */
-    private const HOSTS = ['accounts.google.com', 'oauth2.googleapis.com', 'www.googleapis.com', 'cloudcode-pa.googleapis.com', 'daily-cloudcode-pa.googleapis.com', 'antigravity.google', 'www.antigravity.google'];
+    private const HOSTS = ['accounts.google.com', 'oauth2.googleapis.com', 'www.googleapis.com', 'cloudcode-pa.googleapis.com', 'daily-cloudcode-pa.googleapis.com', 'aicode.googleapis.com', 'antigravity.google', 'www.antigravity.google'];
     private const HEAD_BYTES = 8192;
     private const HEAD_SECONDS = 10.0;
     private const CONNECT_SECONDS = 20.0;

@@ -105,7 +105,7 @@ if (str_contains($prompt, '[[quota]]')) {
     $write('I0921 21:19:51.264799 299 run.go:395] Run: attempt 1 failed (RESOURCE_EXHAUSTED (code 429): Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h49m22s.), retrying in 4s');
     sleep(30);
 }
-foreach (['[[quota-result]]' => 'You have exhausted your capacity on this model', '[[verify]]' => 'Please verify your account to continue', '[[capacity]]' => 'No capacity available for this model'] as $marker => $error) {
+foreach (['[[quota-result]]' => 'You have exhausted your capacity on this model', '[[verify]]' => 'Please verify your account to continue', '[[ineligible]]' => 'Eligibility check failed: Your current account is not eligible for Antigravity, because it is not currently available in your location.', '[[capacity]]' => 'No capacity available for this model'] as $marker => $error) {
     if (str_contains($prompt, $marker)) {
         fwrite(STDERR, 'AGY_ERROR: ' . json_encode(['short_error' => $error]) . "\n");
         $out(['event' => 'result', 'result' => ['conversation_id' => $id, 'status' => 'ERROR', 'response' => '', 'usage' => $usage, 'error' => $error]]);

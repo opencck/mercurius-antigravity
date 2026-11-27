@@ -362,6 +362,10 @@ final class ModelCall {
         if ($has('verify your account', 'terms of service')) {
             return new CallFailed(403, 'account_action_required', 'Google asks the owner of the account to act: open Antigravity and follow what it says. The plan is not called until then.');
         }
+        if ($has('eligibility check failed', 'not eligible for antigravity')) {
+            $this->logger->warning('antigravity: Google says the account is not eligible for Antigravity where it is');
+            return new CallFailed(403, 'account_action_required', 'Google says this account is not eligible for Antigravity: the service is not available in the location of the account. The plan is not called until the owner settles it with Google.');
+        }
         if ($has('not logged into antigravity', 'error getting token source', 'authentication required', 'authentication failed')) {
             return new CallFailed(401, 'authentication_error', 'Nobody is signed in to the Antigravity plan.');
         }
@@ -382,7 +386,9 @@ final class ModelCall {
         if ($has('requires --effort', 'unknown model', 'invalid model', 'model not found')) {
             return new CallFailed(400, 'invalid_request_error', 'The plan does not take this model.');
         }
-        $this->logger->warning('antigravity: agy ended without an answer');
+        // the first line of what agy said: without it the reason is found only by running agy by hand
+        $this->logger->warning('antigravity: agy ended without an answer', ['said' => substr(trim((string) strtok(trim($said), "
+")), 0, 200)]);
         return new CallFailed(502, 'api_error', 'The Antigravity CLI ended without an answer.');
     }
 

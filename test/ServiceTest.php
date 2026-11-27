@@ -292,6 +292,7 @@ final class ServiceTest extends AsyncTestCase {
         yield 'a used-up window in the result' => ['[[quota-result]]', null, 429, 'rate_limit_error'];
         yield 'no sign-in' => ['[[auth]]', null, 401, 'authentication_error'];
         yield 'Google asks the owner to act' => ['[[verify]]', null, 403, 'account_action_required'];
+        yield 'the account is not eligible where it is' => ['[[ineligible]]', null, 403, 'account_action_required'];
         yield 'no capacity' => ['[[capacity]]', null, 529, 'overloaded_error'];
         yield 'silence' => ['[[silent]]', null, 504, 'timeout_error'];
     }
@@ -443,7 +444,7 @@ final class ServiceTest extends AsyncTestCase {
         [$status, $health] = $this->call($server, 'GET', '/health', null, null);
         self::assertSame([503, 'unavailable'], [$status, $health['status']]);
         $egress = new Egress(new \Amp\Socket\DnsSocketConnector(), new NullLogger(), ['extra.example.com', 'bad host', '--x']);
-        foreach (['daily-cloudcode-pa.googleapis.com' => true, 'accounts.google.com' => true, 'antigravity.google' => true, 'oauth2.googleapis.com' => true, 'extra.example.com' => true,
+        foreach (['daily-cloudcode-pa.googleapis.com' => true, 'aicode.googleapis.com' => true, 'accounts.google.com' => true, 'antigravity.google' => true, 'oauth2.googleapis.com' => true, 'extra.example.com' => true,
             'storage.googleapis.com' => false, 'docs.google.com' => false, 'evilgoogle.com' => false, 'google.com.evil.example' => false, 'example.com' => false] as $host => $allowed) {
             self::assertSame($allowed, $egress->allowed($host), $host);
         }
