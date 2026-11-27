@@ -30,7 +30,7 @@ key and Vertex — in Mercurius those are the `gemini:` and `vertex:` providers,
   for it, every wait has a limit. A question `agy` asks on the way is never answered by the service: the sign-in
   stops and the words of the question go to the owner.
 
-What it does not do: change the `agy` binary; read, copy or write the sign-in file; talk to Google's API itself;
+What it does not do: change the `agy` binary; read or copy the sign-in file (it only removes it when the owner signs out); talk to Google's API itself;
 take an API key or cloud credentials; rotate accounts; run tools; imitate a person at a terminal.
 
 ## State
@@ -48,7 +48,7 @@ Everything but `/health` needs `Authorization: Bearer <ANTIGRAVITY_TOKEN>`.
 | `GET /auth/status` | The CLI, the sign-in, whether a sign-in waits for a code, whether a terminal is there for the sign-in, how long the steps took |
 | `POST /auth/login` | Starts a sign-in, returns the link and how long `agy` waits |
 | `POST /auth/code` | Gives the code to the waiting `agy` |
-| `POST /auth/logout` | 501: the CLI has no command to sign out |
+| `POST /auth/logout` | Removes the sign-in of the CLI (the files, never read), so the owner can sign in again, with another account too |
 | `POST /v1/chat/completions` | One model call, as a stream or as one object |
 | `GET /v1/models` | The models of the plan with their efforts and windows |
 | `GET /usage` | The quota of the plan |

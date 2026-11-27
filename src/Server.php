@@ -76,7 +76,7 @@ final class Server {
                 'GET /auth/status' => $this->authStatus(),
                 'POST /auth/login' => $this->loginStart(),
                 'POST /auth/code' => $this->loginCode($request),
-                'POST /auth/logout' => self::error(HttpStatus::NOT_IMPLEMENTED, 'not_implemented', 'The Antigravity CLI has no command to sign out; the owner signs out in the settings of the Google account, or removes the data folder of the module.'),
+                'POST /auth/logout' => $this->logout(),
                 'POST /v1/chat/completions' => $this->completions($request),
                 'GET /usage' => $this->usage(),
                 default => self::json(HttpStatus::OK, ['object' => 'list', 'data' => array_map(
@@ -217,6 +217,15 @@ final class Server {
         } catch (LoginFailed $e) {
             return self::error(HttpStatus::SERVICE_UNAVAILABLE, 'api_error', $e->getMessage());
         }
+    }
+
+    /** The owner signs out to sign in again: the sign-in of the CLI is removed, what was learned of it is forgotten. */
+    private function logout(): Response {
+        $this->cli->signOut();
+        $this->status = null;
+        $this->models->forget();
+        $this->logger->notice('antigravity: the owner signed out');
+        return self::json(HttpStatus::OK, ['auth' => $this->status()->auth]);
     }
 
     private function loginCode(Request $request): Response {

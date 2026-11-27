@@ -386,7 +386,12 @@ final class ServiceTest extends AsyncTestCase {
         [$status, $limit] = $this->call($server, 'POST', '/v1/chat/completions', '{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}]}', self::TOKEN);
         self::assertSame([429, 4070908800], [$status, self::field($limit, 'error', 'resets_at')]);
         self::assertSame(400, $this->call($server, 'POST', '/v1/chat/completions', '{"model":"gpt-9","messages":[{"role":"user","content":"hi"}]}', self::TOKEN)[0]);
-        self::assertSame(501, $this->call($server, 'POST', '/auth/logout', '', self::TOKEN)[0]);
+        // spec: services/antigravity/BRIEF.md#вход — the owner signs out to sign in again, with this account or another
+        [$out, $left] = $this->call($server, 'POST', '/auth/logout', '', self::TOKEN);
+        self::assertSame([200, 'none'], [$out, self::field($left, 'auth')]);
+        self::assertFalse($cli->signedIn(), 'the sign-in file of agy is gone');
+        self::assertSame('none', self::field($this->call($server, 'GET', '/auth/status', null, self::TOKEN)[1], 'auth'));
+        self::assertSame([200, 'none'], [$this->call($server, 'POST', '/auth/logout', '', self::TOKEN)[0], 'none'], 'signing out twice is no error');
     }
 
     public function testAQuestionOfAgyIsHandedToTheOwnerAndNeverAnswered(): void {

@@ -78,6 +78,23 @@ final class AgyCli {
         return $this->signInFile() !== null;
     }
 
+    /**
+     * Removes the sign-in `agy` keeps, at the owner's word: the CLI has no command to sign out, and a new sign-in (with
+     * another account too) needs the old one gone. The files are removed, never read. The access the CLI was given stays
+     * in the settings of the Google account until the owner takes it back there.
+     *
+     * spec: services/antigravity/BRIEF.md#вход
+     */
+    public function signOut(): void {
+        foreach (self::SIGN_IN_FILES as $name) {
+            $path = $this->dataDir() . '/' . $name;
+            if (is_file($path)) {
+                @unlink($path);
+            }
+        }
+        clearstatcache();
+    }
+
     /** @return ?non-empty-string */
     public function signInFile(): ?string {
         foreach (self::SIGN_IN_FILES as $name) {
