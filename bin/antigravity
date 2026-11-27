@@ -25,6 +25,7 @@ use Mercurius\Antigravity\Server;
 use Mercurius\Connectors\RouteException;
 use Mercurius\Connectors\RouteFactory;
 use Mercurius\Antigravity\StderrLogger;
+use Mercurius\Antigravity\Timings;
 
 use function Amp\trapSignal;
 
@@ -95,8 +96,8 @@ $concurrent = max(1, min(8, (int) (getenv('ANTIGRAVITY_MAX_CONCURRENT') ?: 2)));
 $work = $tmp . '/antigravity-work';
 $quota = new Quota($cli, $work);
 $models = new ModelList($cli);
-$calls = new ModelCall($cli, $models, $quota, $tmp, dirname(__DIR__) . '/resources/inert-mcp.php', $logger, $idle, $concurrent);
-$server = (new Server($cli, new Login($cli, $work), $calls, $quota, $models, $token, $logger, $routeName))->start($host, max(1, min(65535, $port)));
+$calls = new ModelCall($cli, $models, $quota, $tmp, dirname(__DIR__) . '/resources/inert-mcp.php', $logger, $idle, $concurrent, 120.0, $timings = new Timings());
+$server = (new Server($cli, new Login($cli, $work, $timings), $calls, $quota, $models, $token, $logger, $routeName))->start($host, max(1, min(65535, $port)));
 fwrite(STDERR, sprintf("antigravity listening on %s:%d\n", $host, $port));
 trapSignal([2, 15]);
 $server->stop();

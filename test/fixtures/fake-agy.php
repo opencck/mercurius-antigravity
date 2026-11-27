@@ -33,10 +33,22 @@ if ($args === ['models']) {
 }
 if (in_array('-p', $args, true)) {
     if (!is_file($signIn)) {
-        echo "Authentication required. Please visit the URL to log in:\n  https://accounts.google.com/o/oauth2/auth?access_type=offline&client_id=fake&redirect_uri=https%3A%2F%2Fantigravity.google%2Foauth-callback&state=abc\n\n";
+        if (is_file($home . '/ask')) {
+            echo "\x1b[1mDo you accept the new terms?\x1b[0m (y/n) ";
+            flush();
+            fgets(STDIN);
+            exit(0);
+        }
+        echo "\x1b[2K\x1b[36mAuthentication required. Please visit the URL to log in:\n  https://accounts.google.com/o/oauth2/auth?access_type=offline&client_id=fake&redirect_uri=https%3A%2F%2Fantigravity.google%2Foauth-callback&state=abc\x1b[0m\n\n";
         echo "Waiting for authentication (timeout 60s)...\nOr, paste the authorization code here and press Enter:\n";
         flush();
         $code = trim((string) fgets(STDIN));
+        if ($code === 'ask-code-0001') {
+            echo "Share usage data with code ask-code-0001? [y/N] ";
+            flush();
+            fgets(STDIN);
+            exit(0);
+        }
         if ($code === 'good-code') {
             @mkdir($data, 0700, true);
             file_put_contents($signIn, str_repeat('t', 64));

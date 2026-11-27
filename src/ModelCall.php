@@ -64,6 +64,7 @@ final class ModelCall {
         private readonly float $idleSeconds = 300.0,
         int $concurrent = 2,
         private readonly float $queueSeconds = 120.0,
+        private readonly ?Timings $timings = null,
     ) {
         $this->places = new LocalSemaphore($concurrent);
     }
@@ -124,7 +125,13 @@ final class ModelCall {
             $written = '';
             $usage = self::NO_USAGE;
             $started = false;
+            $begun = microtime(true);
+            $first = true;
             foreach ($this->lines($process, $log, $started, $group, $cancellation) as $event) {
+                if ($first) {
+                    $first = false;
+                    $this->timings?->note('call_first_event', microtime(true) - $begun);
+                }
                 $kind = Json::string($event, 'event');
                 if ($kind === 'init') {
                     $conversation = self::conversationId($event);
@@ -191,6 +198,7 @@ final class ModelCall {
                     if ($whole !== []) {
                         $usage = self::add(self::NO_USAGE, $whole);
                     }
+                    $this->timings?->note('call_answer', microtime(true) - $begun);
                     yield Event::end('stop', self::usage($usage));
                     return;
                 }

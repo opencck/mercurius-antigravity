@@ -208,7 +208,7 @@ final class Server {
 
     private function authStatus(): Response {
         $status = $this->status();
-        return self::json(HttpStatus::OK, ['cli' => $status->version, 'usable' => $status->usable(), 'auth' => $status->auth, 'detail' => $status->detail, 'login_pending' => $this->login->pending()]);
+        return self::json(HttpStatus::OK, ['cli' => $status->version, 'usable' => $status->usable(), 'auth' => $status->auth, 'detail' => $status->detail, 'login_pending' => $this->login->pending(), 'terminal' => Terminal::available(), 'timings' => $this->login->timings->all()]);
     }
 
     private function loginStart(): Response {

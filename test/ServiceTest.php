@@ -16,6 +16,7 @@ use Mercurius\Antigravity\ChildEnv;
 use Mercurius\Antigravity\Egress;
 use Mercurius\Antigravity\Event;
 use Mercurius\Antigravity\Login;
+use Mercurius\Antigravity\LoginFailed;
 use Mercurius\Antigravity\ModelCall;
 use Mercurius\Antigravity\ModelList;
 use Mercurius\Antigravity\Models;
@@ -24,6 +25,7 @@ use Mercurius\Antigravity\Quota;
 use Mercurius\Antigravity\RefusedEnvironment;
 use Mercurius\Antigravity\RequestRejected;
 use Mercurius\Antigravity\Server;
+use Mercurius\Antigravity\Session;
 use Psr\Log\NullLogger;
 
 use function Amp\ByteStream\buffer;
@@ -356,6 +358,9 @@ final class ServiceTest extends AsyncTestCase {
         self::assertSame(60, $login['wait_seconds']);
         [$status, $done] = $this->call($server, 'POST', '/auth/code', '{"code":"good-code"}', self::TOKEN);
         self::assertSame([200, 'login'], [$status, $done['auth'] ?? null]);
+        [, $auth] = $this->call($server, 'GET', '/auth/status', null, self::TOKEN);
+        self::assertSame(1, self::field($auth, 'timings', 'login_link', 'count'), 'how long the steps took is told');
+        self::assertSame(1, self::field($auth, 'timings', 'login_done', 'count'));
 
         [$status, $list] = $this->call($server, 'GET', '/v1/models', null, self::TOKEN);
         self::assertSame(200, $status);
@@ -381,6 +386,52 @@ final class ServiceTest extends AsyncTestCase {
         self::assertSame([429, 4070908800], [$status, self::field($limit, 'error', 'resets_at')]);
         self::assertSame(400, $this->call($server, 'POST', '/v1/chat/completions', '{"model":"gpt-9","messages":[{"role":"user","content":"hi"}]}', self::TOKEN)[0]);
         self::assertSame(501, $this->call($server, 'POST', '/auth/logout', '', self::TOKEN)[0]);
+    }
+
+    public function testAQuestionOfAgyIsHandedToTheOwnerAndNeverAnswered(): void {
+        $cli = $this->cli();
+        $login = new Login($cli, $this->tmp . '/work');
+        try {
+            $login->code('good-code');
+            self::fail('no sign-in waits');
+        } catch (LoginFailed) {
+        }
+        self::assertStringStartsWith('https://accounts.google.com/', $login->start());
+        self::assertTrue($login->pending());
+        try {
+            $login->code('ask-code-0001');
+            self::fail('a question after the code is not a sign-in');
+        } catch (LoginFailed $e) {
+            self::assertStringContainsString('Share usage data with code ?', $e->getMessage(), 'the words of agy without the code');
+            self::assertStringNotContainsString('ask-code-0001', $e->getMessage());
+        }
+        self::assertFalse($login->pending(), 'the run is stopped, nothing was answered');
+        self::assertFalse($cli->signedIn());
+
+        file_put_contents($this->home . '/ask', '1');
+        try {
+            $login->start();
+            self::fail('a question before the link is not a link');
+        } catch (LoginFailed $e) {
+            self::assertStringContainsString('"Do you accept the new terms? (y/n)"', $e->getMessage(), 'read as text, without the colours of a terminal');
+        }
+        self::assertFalse($login->pending());
+    }
+
+    public function testASessionReadsATerminalAsTextAndWaitsStepByStep(): void {
+        self::assertSame(['ready > ', ''], Session::clean("\x1b[2K\x1b[1;32mready\x1b[0m\r > \x1b]8;;https://x\x07"));
+        self::assertSame(['half', "\x1b[3"], Session::clean("half\x1b[3"), 'a sequence cut by the end of a chunk waits for its rest');
+
+        $session = Session::start([PHP_BINARY, __DIR__ . '/fixtures/talker.php'], $this->tmp, self::base());
+        self::assertFalse($session->terminal, 'pipes unless a terminal was asked for');
+        self::assertNull($session->expect(['never' => '~no such words~'], 0.3), 'a wait has its own limit');
+        self::assertSame(['name', ['name?']], $session->expect(['other' => '~colour\?~', 'name' => '~name\?~'], 10.0), 'the pattern that comes first wins');
+        self::assertTrue($session->send('Mercurius'));
+        $step = $session->expect(['hello' => '~hello (\w+)~', 'name' => '~name\?~'], 10.0);
+        self::assertSame(['hello', ['hello Mercurius', 'Mercurius']], $step, 'what a step has read is not read again');
+        self::assertNull($session->expect(['more' => '~.~'], 10.0), 'the end of the run ends the wait');
+        self::assertFalse($session->running());
+        $session->stop();
     }
 
     public function testAnOldCliMakesTheServiceUnavailableAndTheProxyOpensOnlyHostsOfGoogle(): void {

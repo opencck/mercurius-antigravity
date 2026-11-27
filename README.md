@@ -26,6 +26,9 @@ key and Vertex — in Mercurius those are the `gemini:` and `vertex:` providers,
   anything is started.
 - After a call nothing is left: the process, the record `agy` kept of the conversation and the folder of the call
   are removed.
+- The sign-in is a run under a terminal driven step by step: the link is awaited, the code is sent when `agy` waits
+  for it, every wait has a limit. A question `agy` asks on the way is never answered by the service: the sign-in
+  stops and the words of the question go to the owner.
 
 What it does not do: change the `agy` binary; read, copy or write the sign-in file; talk to Google's API itself;
 take an API key or cloud credentials; rotate accounts; run tools; imitate a person at a terminal.
@@ -42,7 +45,7 @@ Everything but `/health` needs `Authorization: Bearer <ANTIGRAVITY_TOKEN>`.
 | Route | What |
 |-------|------|
 | `GET /health` | 200 without a sign-in when the CLI is found and new enough; else 503 |
-| `GET /auth/status` | The CLI, the sign-in, whether a sign-in waits for a code |
+| `GET /auth/status` | The CLI, the sign-in, whether a sign-in waits for a code, whether a terminal is there for the sign-in, how long the steps took |
 | `POST /auth/login` | Starts a sign-in, returns the link and how long `agy` waits |
 | `POST /auth/code` | Gives the code to the waiting `agy` |
 | `POST /auth/logout` | 501: the CLI has no command to sign out |
